@@ -1,0 +1,163 @@
+---
+title: "SECOORA_simplex"
+author: "Katherine Qi"
+date: "3/10/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library('stats')
+library('tidyverse')
+library('lubridate')
+library('dplyr')
+library('xts')
+library('geosphere')
+library('ggplot2')
+library('rEDM')
+library('textir')
+```
+
+```{r}
+# local development only
+rm(list=ls())
+base_dir <- dirname(getwd())
+curr_dir <- paste(base_dir,"/SIOB_276L/", sep="")
+setwd(curr_dir)
+```
+
+```{r}
+# read in data
+habd <- read.csv('hab_filtered_2020.csv', header=TRUE)
+c15_temp <- read.csv('c15_7219_a390_ca39.csv', header=TRUE)
+# remove rows with NA
+c15_temp <- c15_temp[complete.cases(c15_temp),]
+c15_temp$time <- as.Date(c15_temp$time)
+c15_temp$sea_water_temperature <- as.numeric(c15_temp$sea_water_temperature)
+length(c15_temp$sea_water_temperature)
+```
+
+```{r}
+# we can choose a bounding box to define how which hab stations we want, filtering out the stations that are too far away- we can start with a radius of 50 km
+print(length(habd$longitude))
+# coords of c15
+C15<- tibble(
+  lat=rep(27.2990, 17114),
+  long = rep(-82.6400, 17114))
+# get distances
+dist<-distGeo(habd[, c("longitude", "latitude")], C15[, c("long", "lat")])
+habd_dist <- cbind(habd, difference_metersC15=dist)
+# keep only 20 km
+habd_dist <- habd_dist[habd_dist$difference_metersC15<50000,]
+length(habd_dist$difference_metersC15)
+# reduced from 36636 to 13704 samples
+```
+
+```{r}
+# set range
+c15_cut <- c15_temp[c15_temp$time >= "2000-01-04" & c15_temp$time <= "2017-05-22",]
+# group by week and average for c15
+c15_weeks <- c15_cut %>% group_by(week = cut(time, "week")) %>% summarise(swt = mean(sea_water_temperature))
+
+# set time to be in same format as c15
+#habd_dist$sample_date <- as.Date(habd_dist$sample_date)
+habd_dist$sample_date <- format(as.POSIXct(strptime(habd_dist$sample_date,"%m/%d/%Y %H:%M",tz="")) ,format = "%Y-%m-%d")
+# set range
+habd_cut <- habd_dist[habd_dist$sample_date >= "2000-01-01" & habd_dist$sample_date <= "2017-05-22",]
+# make sure its date format for numeric
+habd_cut$sample_date <- as.Date(habd_cut$sample_date)
+# group by week and average
+habd_weeks <- habd_cut %>% group_by(week = cut(sample_date, "week")) %>% summarise(cell_count = mean(cellcount))
+```
+
+```{r}
+# merge habd_weeks and c15_weeks
+all_dat <- merge(habd_weeks, c15_weeks, by='week')
+# reduced to 488 samples over 17 years
+
+# make this scalable
+log_all_dat <- data.frame(week=all_dat$week)
+log_all_dat$week <- as.Date(log_all_dat$week)
+log_all_dat$log_cc <- log(all_dat$cell_count)
+log_all_dat$log_swt <- log(all_dat$swt)
+#plot(all_dat$week, all_dat$log_cc, line='-')
+# plot raw data
+melt_all <- melt(log_all_dat,id="week")
+raw_plot <- ggplot(melt_all,aes(x=week,y=value,color=variable, group=variable)) + geom_line() + ggtitle('Cell Counts of Karenia Brevis against Seawater Temperature') + xlab('Week') + ylab('Log Concentration') 
+# fix date scaling
+raw_plot + scale_x_date(date_breaks = "1 year") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+```
+
+
+```{r}
+## ok let's see if we can do simplex on this
+# normalize data to see if that changes anything
+normalize <- function(data){
+  ts = data[!is.na(data)]
+  data = (data - min(ts))/(max(ts)-min(ts))
+}
+
+# normalize raw data
+norm_all_dat <- all_dat
+# cell count
+norm_all_dat[,2] <- normalize(norm_all_dat[,2])^.5
+norm_all_dat[,3] <- normalize(norm_all_dat[,3])^.5
+
+# normalize log data
+norm_log_all_dat <- log_all_dat
+# cell count
+norm_log_all_dat[,2] <- normalize(norm_log_all_dat[,2])^.5
+norm_log_all_dat[,3] <- normalize(norm_log_all_dat[,3])^.5
+
+# plot some raw embeddings
+dev.off()
+plot(all_dat[,2][1:487], all_dat[,1][2:488],xlab=  "x(t)", ylab = "x(t+1)", main = "Cell Count Raw Embedding")
+
+# plot some normalized raw embeddings
+plot(norm_all_dat[,2][1:487], norm_all_dat[,1][2:488],xlab=  "x(t)", ylab = "x(t+1)", main = "Normalized Cell Count Raw Embedding")
+
+# plot log data embeddings 
+plot(log_all_dat[,2][1:487], log_all_dat[,1][2:488],xlab=  "x(t)", ylab = "x(t+1)", main = "Log Cell Count Raw Embedding")
+
+# plot some log normalized embeddings
+plot(norm_log_all_dat[,2][1:487], norm_log_all_dat[,1][2:488],xlab=  "x(t)", ylab = "x(t+1)", main = "Normalized Log Cell Count Raw Embedding")
+```
+
+```{r}
+# look for optimal embedding dimensions
+log_cc_simp <- simplex(log_all_dat[,2])
+norm_log_cc_simp <- simplex(norm_all_dat[,2])
+
+# embeddings for log 
+plot(log_cc_simp$E,log_cc_simp$rho,type = 'l',lwd = 2, ylim = c(0,1), xlab="Embed Dimension", ylab='rho', main='Log-Transformed Cell Counts')
+# embeddings for log normalized
+plot(norm_log_cc_simp$E,norm_log_cc_simp$rho,type = 'l',lwd = 2, ylim = c(0,1), xlab="Embed Dimension", ylab='rho', main='Normalized Log-Transformed Cell Counts')
+```
+
+
+```{r}
+# going to go with log data with embedding = 3
+model1 = simplex(log_all_dat[,1][200:488], E = 3, stats_only = F)
+o1 = model1$model_output[[1]]
+
+# predictions vs observations
+plot(o1$Observations, o1$Predictions)
+
+# predictability over time
+rhos1 = {}
+for(i in c(100:nrow(o1))){
+  a = o1$Observations[(i-99):i]
+  b = o1$Predictions[(i-99):i]
+
+  a2 = a[!is.na(a) & !is.na(b)]
+  b2 = b[!is.na(a) & !is.na(b)]
+  rhos1 = c(rhos1, cor(a2,b2))
+}
+
+plot(rhos1, type = 'l', lwd = 2, xaxt='n',  main='Predictability Over Time')
+legend("bottomleft",legend = "log cell count")
+
+# model1 = simplex(log_all_dat[,1],lib="1 200",pred="201 488", E = 3, stats_only = F)
+# o1 = model1$model_output[[1]]
+```
+
