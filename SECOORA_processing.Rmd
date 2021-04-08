@@ -11,20 +11,41 @@ library('stats')
 library('tidyverse')
 library('lubridate')
 library('dplyr')
-library('xts')
 library('geosphere')
 library('ggplot2')
 library('rEDM')
-library('textir')
+library('wesanderson')
+library('hrbrthemes')
+hrbrthemes::import_roboto_condensed()
 ```
 
 ```{r}
 # local development only
 rm(list=ls())
-base_dir <- dirname(getwd())
+base_dir <- "~/Desktop/Textbooks_Homework/Spring_21/"
 curr_dir <- paste(base_dir,"/SIOB_276L/", sep="")
 setwd(curr_dir)
 ```
+
+```{r}
+nutrients <- read.csv('Data_479A_Final.csv')
+# group by week
+nutrients$Sample.Date.and.Time <- as.Date(nutrients$Sample.Date.and.Time)
+
+nutrients_w <- nutrients %>% group_by(week = cut(Sample.Date.and.Time, "week"), param = Parameter.Name) %>% summarise(result = mean(Sample.Result))
+
+good_param <- c("Chlorophyll (Total", "Dissolved Oxygen (Total)", "Nitrogen- Total (Total)", "Phosphorus- Total (Total)", "Salinity (Total)", "Temperature (Total)", "pH (Total)", "Iron (Dissolved)")
+
+nutrients_sub <- nutrients_w[nutrients_w$param %in% good_param,]
+nutrients_sub$week <- as.Date(nutrients_sub$week)
+
+ggplot(nutrients_sub, aes(y = log(result), x = week, color=param)) +
+    geom_point() + geom_smooth(method = "lm") + scale_x_date(date_breaks = "1 year") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+write.csv(nutrients_sub, "montly_nutrients_subset.csv")
+```
+
+
 
 ```{r}
 # read in data
@@ -33,6 +54,7 @@ c15_temp <- read.csv('c15_7219_a390_ca39.csv', header=TRUE)
 # remove rows with NA
 c15_temp <- c15_temp[complete.cases(c15_temp),]
 c15_temp$time <- as.Date(c15_temp$time)
+
 c15_temp$sea_water_temperature <- as.numeric(c15_temp$sea_water_temperature)
 length(c15_temp$sea_water_temperature)
 ```
@@ -47,7 +69,7 @@ C15<- tibble(
 # get distances
 dist<-distGeo(habd[, c("longitude", "latitude")], C15[, c("long", "lat")])
 habd_dist <- cbind(habd, difference_metersC15=dist)
-# keep only 20 km
+# keep only 50 km
 habd_dist <- habd_dist[habd_dist$difference_metersC15<50000,]
 length(habd_dist$difference_metersC15)
 # reduced from 36636 to 13704 samples
@@ -83,9 +105,35 @@ log_all_dat$log_swt <- log(all_dat$swt)
 #plot(all_dat$week, all_dat$log_cc, line='-')
 # plot raw data
 melt_all <- melt(log_all_dat,id="week")
-raw_plot <- ggplot(melt_all,aes(x=week,y=value,color=variable, group=variable)) + geom_line() + ggtitle('Cell Counts of Karenia Brevis against Seawater Temperature') + xlab('Week') + ylab('Log Concentration') 
+dev.off()
+# colors
+cc_col <- wes_palettes$Zissou1[1]
+swt_col <- wes_palettes$Zissou1[5]
+raw_plot <- ggplot(log_all_dat,aes(x=week)) +
+  geom_line(aes(y=log_cc), color=cc_col) + geom_line(aes(y=log_swt*3), 
+                                                    color=swt_col) + 
+  ggtitle('Cell Counts of Karenia Brevis against Seawater Temperature') +
+  xlab("Year")  + 
+  scale_y_continuous(name="Log Concentration", 
+                     sec.axis = sec_axis(trans=~./3, 
+                                         name="Log Temperature")) + 
+  #theme_ipsum() + 
+  theme(
+    axis.title.y = element_text(color = cc_col, size=13),
+    axis.title.y.right = element_text(color = swt_col, size=13)
+  )
+# raw_plot <- ggplot(melt_all,aes(x=week,y=value,color=variable, group=variable)) +
+#   geom_line(aes(y=log_cc)) + geom_line(aes(y=log_swt)) + 
+#   ggtitle('Cell Counts of Karenia Brevis against Seawater Temperature') +
+#   xlab('Week')  + 
+#   scale_y_continuous(name="Log Concentration", 
+#                      sec.axis = sec_axis(trans=~./3, 
+#                                          name="Log Temperature"))
 # fix date scaling
-raw_plot + scale_x_date(date_breaks = "1 year") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+raw_plot + scale_x_date(date_breaks = "1 year") + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  scale_color_manual(labels=c("Cell Count", "Temperature"),
+                     values =wes_palette(n=2, name="Darjeeling1"))
 ```
 
 
@@ -111,16 +159,25 @@ norm_log_all_dat[,3] <- normalize(norm_log_all_dat[,3])^.5
 
 # plot some raw embeddings
 dev.off()
-plot(all_dat[,2][1:487], all_dat[,1][2:488],xlab=  "x(t)", ylab = "x(t+1)", main = "Cell Count Raw Embedding")
+plot(all_dat[,2][1:487], all_dat[,2][2:488],xlab=  "x(t)", ylab = "x(t+1)", main = "Cell Count Raw Embedding")
 
 # plot some normalized raw embeddings
-plot(norm_all_dat[,2][1:487], norm_all_dat[,1][2:488],xlab=  "x(t)", ylab = "x(t+1)", main = "Normalized Cell Count Raw Embedding")
+plot(norm_all_dat[,2][1:487], norm_all_dat[,2][2:488],xlab=  "x(t)", ylab = "x(t+1)", main = "Normalized Cell Count Raw Embedding")
+
 
 # plot log data embeddings 
-plot(log_all_dat[,2][1:487], log_all_dat[,1][2:488],xlab=  "x(t)", ylab = "x(t+1)", main = "Log Cell Count Raw Embedding")
+par(mfrow=c(1,3))
+plot(log_all_dat[,2][1:487], log_all_dat[,2][2:488],xlab=  "x(t)", ylab = "x(t+1)", main = "Raw Embedding for 1 week")
+abline(lm(log_all_dat[,2][2:488] ~ log_all_dat[,2][1:488]), col='red')
+
+plot(log_all_dat[,2][1:482], log_all_dat[,2][7:488],xlab=  "x(t)", ylab = "x(t+5)", main = "Raw Embedding for 5 weeks")
+abline(lm(log_all_dat[,2][1:482] ~ log_all_dat[,2][7:488]), col='red')
+
+plot(log_all_dat[,2][1:478], log_all_dat[,2][11:488],xlab=  "x(t)", ylab = "x(t+10)", main = "Raw Embedding for 10 weeks")
+abline(lm(log_all_dat[,2][1:478] ~ log_all_dat[,2][11:488]), col='red')
 
 # plot some log normalized embeddings
-plot(norm_log_all_dat[,2][1:487], norm_log_all_dat[,1][2:488],xlab=  "x(t)", ylab = "x(t+1)", main = "Normalized Log Cell Count Raw Embedding")
+plot(norm_log_all_dat[,2][1:487], norm_log_all_dat[,2][2:488],xlab=  "x(t)", ylab = "x(t+1)", main = "Normalized Log Cell Count Raw Embedding")
 ```
 
 ```{r}
@@ -137,11 +194,13 @@ plot(norm_log_cc_simp$E,norm_log_cc_simp$rho,type = 'l',lwd = 2, ylim = c(0,1), 
 
 ```{r}
 # going to go with log data with embedding = 3
-model1 = simplex(log_all_dat[,1][200:488], E = 3, stats_only = F)
+dev.off()
+model1 = simplex(log_all_dat[,2][200:488], E = seq(1,10,1), stats_only = T)
 o1 = model1$model_output[[1]]
 
 # predictions vs observations
 plot(o1$Observations, o1$Predictions)
+plot(unlist(model1$rho), type='l')
 
 # predictability over time
 rhos1 = {}
@@ -159,5 +218,9 @@ legend("bottomleft",legend = "log cell count")
 
 # model1 = simplex(log_all_dat[,1],lib="1 200",pred="201 488", E = 3, stats_only = F)
 # o1 = model1$model_output[[1]]
+```
+
+```{r}
+rho_theta <- PredictNonlinear(dataFrame = log_all_dat, lib = "1 488", pred = "1 488", target = "log_cc", columns = "log_swt", E = 5, embedded = TRUE)
 ```
 

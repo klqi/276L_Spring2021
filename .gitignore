@@ -3,3 +3,4 @@ __pycache__
 .Rhistory
 .ipynb_checkpoints/
 *.csv
+*.RData
